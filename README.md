@@ -211,7 +211,7 @@ This method adds data of given type if it does not exist, else updates.
 
 ###### **Method 2**
 
-- TYPE  : `POST`
+- TYPE  : `PUT`
 
 - URL   : `/:type`
 
