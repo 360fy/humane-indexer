@@ -37,6 +37,8 @@ const HEAD_HTTP_METHOD = 'HEAD';
 
 const AGGREGATE_MODE = 'aggregate';
 
+const SignalKeyRegex = /_(hourly|daily|weekly|monthly|overall)Stats/;
+
 const SignalAggregateTimeUnitMap = {
     timestamp: {
         name: 'timestamp'
@@ -1014,7 +1016,7 @@ class IndexerInternal {
                 // in case of full update, for any value not defined in newDoc - need to be explicitly marked null
                 if (!request.partial) {
                     _.forOwn(existingDoc, (value, key) => {
-                        if (!newDoc[key]) {
+                        if (!SignalKeyRegex.test(key) && _.isUndefined(newDoc[key])) {
                             newDoc[key] = null;
                         }
                     });
@@ -1222,7 +1224,6 @@ class IndexerInternal {
     _aggregateOverallSignal(stats, signalName, signalValue = 1, updateTime) {
         const fieldKey = (field) => `_overallStats.${signalName}.${field}`;
 
-        _.set(stats, fieldKey(StatsMappingFields.Name), signalName);
         _.set(stats, fieldKey(StatsMappingFields.LastUpdateTime), updateTime);
         _.set(stats, fieldKey(StatsMappingFields.Value), signalValue + _.get(stats, fieldKey(StatsMappingFields.Value), 0));
     }
