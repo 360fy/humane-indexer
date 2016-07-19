@@ -1595,10 +1595,10 @@ export default class Indexer {
         this.internal = new IndexerInternal(indicesConfig);
     }
 
-    errorWrap(promise) {
+    errorWrap(method, request, promise) {
         return Promise.resolve(promise)
           .catch(error => {
-              console.error('>>> Error', error, error.stack);
+              console.error('>>> Error', method, request, error, error.stack);
               if (error && (error._errorCode === 'VALIDATION_ERROR' || error._errorCode === 'INTERNAL_SERVICE_ERROR')) {
                   // rethrow same error
                   throw error;
@@ -1609,35 +1609,35 @@ export default class Indexer {
     }
 
     upsert(headers, request) {
-        return this.errorWrap(this.internal.upsert(request));
+        return this.errorWrap('upsert', request, this.internal.upsert(request));
     }
 
     update(headers, request) {
-        return this.errorWrap(this.internal.update(request));
+        return this.errorWrap('update', request, this.internal.update(request));
     }
 
     partialUpdate(headers, request) {
-        return this.errorWrap(this.internal.partialUpdate(request));
+        return this.errorWrap('partialUpdate', request, this.internal.partialUpdate(request));
     }
 
     addSignal(headers, request) {
-        return this.errorWrap(this.internal.addSignal(request));
+        return this.errorWrap('addSignal', request, this.internal.addSignal(request));
     }
 
     remove(headers, request) {
-        return this.errorWrap(this.internal.remove(request));
+        return this.errorWrap('remove', request, this.internal.remove(request));
     }
 
     add(headers, request) {
-        return this.errorWrap(this.internal.add(request));
+        return this.errorWrap('add', request, this.internal.add(request));
     }
 
     createIndex(indexKey) {
-        return this.errorWrap(this.internal.createIndex(indexKey));
+        return this.errorWrap('createIndex', indexKey, this.internal.createIndex(indexKey));
     }
 
     deleteIndex(indexKey) {
-        return this.errorWrap(this.internal.deleteIndex(indexKey));
+        return this.errorWrap('deleteIndex', indexKey, this.internal.deleteIndex(indexKey));
     }
 
     shutdown() {
