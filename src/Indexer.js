@@ -3,7 +3,7 @@ import Promise from 'bluebird';
 import Chalk from 'chalk';
 import performanceNow from 'performance-now';
 import moment from 'moment';
-import buildRequest from 'humane-node-commons/lib/Request';
+import * as Request from 'humane-node-commons/lib/Request';
 import buildRedisClient from 'humane-node-commons/lib/RedisClient';
 import ValidationError from 'humane-node-commons/lib/ValidationError';
 import InternalServiceError from 'humane-node-commons/lib/InternalServiceError';
@@ -119,7 +119,7 @@ class IndexerInternal {
         this.logLevel = config.logLevel || INFO_LOG_LEVEL;
         this.instanceName = config.instanceName;
 
-        this.request = buildRequest(_.extend({}, config.esConfig, {logLevel: this.logLevel, baseUrl: config.esConfig && config.esConfig.url || 'http://localhost:9200'}));
+        this.request = Request.builder(_.extend({}, config.esConfig, {logLevel: this.logLevel, baseUrl: config.esConfig && config.esConfig.url || 'http://localhost:9200'}));
 
         if (config.redisConfig || config.redisSentinelConfig) {
             this.redisClient = buildRedisClient(_.pick(config, ['redisConfig', 'redisSentinelConfig']));
@@ -281,70 +281,70 @@ class IndexerInternal {
           });
     }
 
-    handleResponse(response, okStatusCodes, operation) {
-        if (!response) {
-            return Promise.reject('ERROR: No Response');
-        }
-
-        if (_.isArray(response)) {
-            response = response[0];
-        }
-
-        if (this.logLevel === DEBUG_LOG_LEVEL
-          || this.logLevel === TRACE_LOG_LEVEL
-          || (response.statusCode >= 400
-          && (!okStatusCodes || !okStatusCodes[response.statusCode])
-          && response.request.method !== HEAD_HTTP_METHOD)) {
-            console.log();
-            console.log(Chalk.blue('------------------------------------------------------'));
-            console.log(Chalk.blue.bold(`${response.request.method} ${response.request.href}`));
-
-            const format = response.statusCode < 400 ? Chalk.green : Chalk.red;
-
-            console.log(format(`Status: ${response.statusCode}, Elapsed Time: ${response.elapsedTime}`));
-
-            if (response.request.method !== HEAD_HTTP_METHOD) {
-                console.log(format(JSON.stringify(response.body, null, 2)));
-            }
-
-            console.log(Chalk.blue('------------------------------------------------------'));
-            console.log();
-        }
-
-        if (response.statusCode < 400 || okStatusCodes && okStatusCodes[response.statusCode]) {
-            return _.extend({
-                _statusCode: response.statusCode,
-                _status: response.statusCode < 400 ? SUCCESS_STATUS : FAIL_STATUS,
-                _elapsedTime: response.elapsedTime,
-                _operation: operation
-            }, response.body);
-        }
-
-        throw new InternalServiceError('Internal Service Error', {
-            _statusCode: response.statusCode, details: response.body && response.body.error || response.body
-        });
-    }
-
-    handleResponseArray(responses, okStatusCodes, operation) {
-        return Promise
-          .all(_.map(responses, response => {
-              let promise = null;
-              try {
-                  promise = Promise.resolve(this.handleResponse(response, okStatusCodes, operation));
-              } catch (error) {
-                  promise = Promise.reject(error);
-              }
-
-              return promise.reflect();
-          }))
-          .map(inspection => {
-              if (inspection.isFulfilled()) {
-                  return inspection.value();
-              }
-
-              return inspection.reason();
-          });
-    }
+    // handleResponse(response, okStatusCodes, operation) {
+    //     if (!response) {
+    //         return Promise.reject('ERROR: No Response');
+    //     }
+    //
+    //     if (_.isArray(response)) {
+    //         response = response[0];
+    //     }
+    //
+    //     if (this.logLevel === DEBUG_LOG_LEVEL
+    //       || this.logLevel === TRACE_LOG_LEVEL
+    //       || (response.statusCode >= 400
+    //       && (!okStatusCodes || !okStatusCodes[response.statusCode])
+    //       && response.request.method !== HEAD_HTTP_METHOD)) {
+    //         console.log();
+    //         console.log(Chalk.blue('------------------------------------------------------'));
+    //         console.log(Chalk.blue.bold(`${response.request.method} ${response.request.href}`));
+    //
+    //         const format = response.statusCode < 400 ? Chalk.green : Chalk.red;
+    //
+    //         console.log(format(`Status: ${response.statusCode}, Elapsed Time: ${response.elapsedTime}`));
+    //
+    //         if (response.request.method !== HEAD_HTTP_METHOD) {
+    //             console.log(format(JSON.stringify(response.body, null, 2)));
+    //         }
+    //
+    //         console.log(Chalk.blue('------------------------------------------------------'));
+    //         console.log();
+    //     }
+    //
+    //     if (response.statusCode < 400 || okStatusCodes && okStatusCodes[response.statusCode]) {
+    //         return _.extend({
+    //             _statusCode: response.statusCode,
+    //             _status: response.statusCode < 400 ? SUCCESS_STATUS : FAIL_STATUS,
+    //             _elapsedTime: response.elapsedTime,
+    //             _operation: operation
+    //         }, response.body);
+    //     }
+    //
+    //     throw new InternalServiceError('Internal Service Error', {
+    //         _statusCode: response.statusCode, details: response.body && response.body.error || response.body
+    //     });
+    // }
+    //
+    // handleResponseArray(responses, okStatusCodes, operation) {
+    //     return Promise
+    //       .all(_.map(responses, response => {
+    //           let promise = null;
+    //           try {
+    //               promise = Promise.resolve(this.handleResponse(response, okStatusCodes, operation));
+    //           } catch (error) {
+    //               promise = Promise.reject(error);
+    //           }
+    //
+    //           return promise.reflect();
+    //       }))
+    //       .map(inspection => {
+    //           if (inspection.isFulfilled()) {
+    //               return inspection.value();
+    //           }
+    //
+    //           return inspection.reason();
+    //       });
+    // }
 
     typeConfig(typeOrConfig) {
         if (!typeOrConfig) {
@@ -371,13 +371,13 @@ class IndexerInternal {
               .value();
 
             return Promise.all(promises)
-              .then(responses => this.handleResponseArray(responses, {404: true}, 'DELETE_INDICES'));
+              .then(responses => Request.handleResponseArray(responses, {404: true}, 'DELETE_INDICES', this.logLevel));
         }
 
         const indexConfig = this.indicesConfig.indices[indexKey];
 
         return this.request({method: DELETE_HTTP_METHOD, uri: `${indexConfig.store}`})
-          .then(response => this.handleResponse(response, {404: true}, 'DELETE_INDEX'));
+          .then(response => Request.handleResponse(response, {404: true}, 'DELETE_INDEX', this.logLevel));
     }
 
     getMapping(mapping) {
@@ -430,7 +430,7 @@ class IndexerInternal {
               .value();
 
             return Promise.all(promises)
-              .then(responses => this.handleResponseArray(responses, {404: true}, 'CREATE_INDICES'));
+              .then(responses => Request.handleResponseArray(responses, {404: true}, 'CREATE_INDICES'), this.logLevel);
         }
 
         const indexConfig = this.indicesConfig.indices[indexKey];
@@ -463,13 +463,13 @@ class IndexerInternal {
                 mappings
             }
         })
-          .then(response => this.handleResponse(response, {404: true}, 'CREATE_INDEX'));
+          .then(response => Request.handleResponse(response, {404: true}, 'CREATE_INDEX'), this.logLevel);
     }
 
     exists(request) {
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
         return this.request({method: HEAD_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${request.id}`})
-          .then(response => this.handleResponse(response, {404: true}, 'EXISTS'));
+          .then(response => Request.handleResponse(response, {404: true}, 'EXISTS'), this.logLevel);
     }
 
     get(request) {
@@ -487,7 +487,7 @@ class IndexerInternal {
         const uri = `${typeConfig.index}/${typeConfig.type}/${request.id}`;
 
         return this.request({method: GET_HTTP_METHOD, uri})
-          .then(response => this.handleResponse(response, {404: true}, GET_OP))
+          .then(response => Request.handleResponse(response, {404: true}, GET_OP, this.logLevel))
           .then(response => {
               const result = !!response ? response._source : null;
 
@@ -516,7 +516,7 @@ class IndexerInternal {
 
         return this.request({method: GET_HTTP_METHOD, uri, qs: {fields: _.join(fields, ',')}})
           .then(response => {
-              let result = this.handleResponse(response, {404: true}, 'OPTIMISED_GET');
+              let result = Request.handleResponse(response, {404: true}, 'OPTIMISED_GET', this.logLevel);
 
               result = !_.isUndefined(result) && !_.isNull(result) && _.get(result, 'found', false) ? _.get(result, 'fields', {}) : null;
 
@@ -932,7 +932,7 @@ class IndexerInternal {
                 }
 
                 return this.request({method: PUT_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}`, body: doc})
-                  .then(response => this.handleResponse(response, {404: true}, operationType))
+                  .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
                   .then(response => {
                       result = response;
 
@@ -964,7 +964,7 @@ class IndexerInternal {
                 }
 
                 return this.request({method: DELETE_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}`})
-                  .then(response => this.handleResponse(response, {404: true}, operationType))
+                  .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
                   .then(response => {
                       result = response;
 
@@ -1054,7 +1054,7 @@ class IndexerInternal {
                 }
 
                 return this.request({method: POST_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}/_update`, body: {doc: newDoc}})
-                  .then(response => this.handleResponse(response, {404: true}, operationType))
+                  .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
                   .then(response => {
                       result = response;
 
