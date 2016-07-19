@@ -885,7 +885,11 @@ class IndexerInternal {
 
                 return this.add({type, doc, id, lockHandle});
             })
-            .then(() => this.aggregatorCache.remove(key));
+            .then(() => this.aggregatorCache.remove(key))
+            .catch(error => {
+                console.error(`>>> Error in flushing key: ${key}`, error, error.stack);
+                return false;
+            });
 
         return this.lock.usingLock(operation, key, null, timeTaken => console.log(Chalk.yellow(`Flushed Key: ${key} in ${timeTaken}ms`)));
     }
