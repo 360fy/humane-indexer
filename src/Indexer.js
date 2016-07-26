@@ -533,6 +533,10 @@ class IndexerInternal {
               }
 
               return result;
+          })
+          .catch(error => {
+              console.error('<< ERROR >> ', error);
+              return null;
           });
     }
 
