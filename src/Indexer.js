@@ -17,7 +17,10 @@ const GET_OP = 'GET';
 const ADD_OP = 'ADD';
 const REMOVE_OP = 'REMOVE';
 const UPDATE_OP = 'UPDATE';
-const PARTIAL_UPDATE_OP = 'PARTIAL_UPDATE';
+const MERGE_OP = 'MERGE';
+
+const UPDATE_MODE_MERGE = 'MERGE';
+const UPDATE_MODE_FULL = 'FULL';
 
 const SUCCESS_STATUS = 'SUCCESS';
 const FAIL_STATUS = 'FAIL';
@@ -136,6 +139,9 @@ class IndexerInternal {
                 mapping: SearchQueryMapping,
                 id: (doc) => doc.key,
                 weight: (doc) => doc.count,
+                // measures: { // TODO: handle this
+                //     count: (oldDoc) => _.get(oldDoc, 'count', 0) + 1
+                // }
                 mode: AGGREGATE_MODE,
                 aggregateBuilder: (existingDoc, newDoc) => ({key: newDoc.key, _lang: newDoc._lang, query: newDoc.query, unicodeQuery: newDoc.unicodeQuery, hasResults: newDoc.hasResults})
             }
@@ -148,6 +154,28 @@ class IndexerInternal {
 
         // TODO: validate indices config are proper
         this.indicesConfig = _.defaultsDeep(config.indicesConfig, {indices, types: DefaultTypes});
+
+        if (this.indicesConfig.aggregators) {
+            _.forEach(this.indicesConfig.aggregators, (aggregatorConfig) => {
+                this.enhanceAggregatorTypes(_.get(aggregatorConfig, 'aggregates'), this.indicesConfig);
+            });
+        }
+    }
+
+    enhanceAggregatorTypes(types, indicesConfig) {
+        if (!types) {
+            return;
+        }
+
+        _.forEach(types, (type, key) => {
+            if (!type.indexType) {
+                type.indexType = indicesConfig.types[key];
+            } else if (type.indexType && _.isString(type.indexType)) {
+                type.indexType = indicesConfig.types[type.indexType];
+            } else if (_.isObject(type.indexType)) {
+                type.indexType = _.defaultsDeep(type.indexType, indicesConfig.types[key] || {});
+            }
+        });
     }
 
     enhanceType(indices, key, type) {
@@ -466,6 +494,40 @@ class IndexerInternal {
           .then(response => Request.handleResponse(response, {404: true}, 'CREATE_INDEX'), this.logLevel);
     }
 
+    // addMapping(indexType, field, fieldType) {
+    //     const indexConfig = this.indicesConfig.indices[indexKey];
+    //
+    //     let mappings = null;
+    //
+    //     _(this.indicesConfig.types)
+    //       .values()
+    //       .filter(type => type.index === indexConfig.store)
+    //       .forEach(type => {
+    //           mappings[type.type] = {
+    //               _all: {
+    //                   enabled: false
+    //               },
+    //               dynamic_templates: type.dynamic_templates,
+    //               properties: _.mapValues(type.mapping, property => this.getMapping(property))
+    //           };
+    //       });
+    //
+    //     return this.request({
+    //         method: PUT_HTTP_METHOD, uri: `${indexConfig.store}`, body: {
+    //             settings: {
+    //                 index: _.defaultsDeep(indexConfig.indexSettings, {
+    //                     number_of_shards: 2,
+    //                     did_you_mean_enabled: true,
+    //                     did_you_mean_index_name: null
+    //                 }),
+    //                 analysis: indexConfig.analysis
+    //             },
+    //             mappings
+    //         }
+    //     })
+    //       .then(response => Request.handleResponse(response, {404: true}, 'CREATE_INDEX'), this.logLevel);
+    // }
+
     exists(request) {
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
         return this.request({method: HEAD_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${request.id}`})
@@ -581,14 +643,14 @@ class IndexerInternal {
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
         let newDoc = request.newDoc;
         const existingDoc = request.existingDoc;
-        const partial = request.partial || false;
+        const isMerge = request.updateMode === UPDATE_MODE_MERGE;
 
         const aggregatorsConfig = this.indicesConfig.aggregators && this.indicesConfig.aggregators[typeConfig.type];
         if (!aggregatorsConfig) {
             return false;
         }
 
-        if (aggregatorsConfig.filter && _.isFunction(aggregatorsConfig.filter) && !aggregatorsConfig.filter(newDoc, existingDoc, partial)) {
+        if (aggregatorsConfig.filter && _.isFunction(aggregatorsConfig.filter) && !aggregatorsConfig.filter(newDoc, existingDoc, isMerge)) {
             newDoc = null;
         }
 
@@ -702,7 +764,7 @@ class IndexerInternal {
                             }
                         }
 
-                        if (partial && _.isUndefined(newDoc[measureName])) {
+                        if (isMerge && _.isUndefined(newDoc[measureName])) {
                             // we skip if new doc does not have value in case of partial update
                             return true;
                         }
@@ -810,9 +872,9 @@ class IndexerInternal {
 
                   if (!found) {
                       // for partial case if there is no doc aggregate, still update aggregate for existing doc aggregate
-                      if (partial && (!newDocAggregates || newDocAggregates.length === 0)) {
+                      if (isMerge && (!newDocAggregates || newDocAggregates.length === 0)) {
                           aggregatesToUpdate.push(existingDocAggregate);
-                      } else if (!partial) {
+                      } else if (!isMerge) {
                           aggregatesToRemove.push(existingDocAggregate);
                       }
                   }
@@ -956,6 +1018,8 @@ class IndexerInternal {
         const operationType = REMOVE_OP;
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
 
+        const updateMode = request.updateMode || UPDATE_MODE_FULL;
+
         const id = request.id;
 
         if (!id) {
@@ -976,7 +1040,7 @@ class IndexerInternal {
                   .then(response => {
                       result = response;
 
-                      return this.buildAggregates({typeConfig, existingDoc, partial: request.partial});
+                      return this.buildAggregates({typeConfig, existingDoc, updateMode});
                   })
                   .then(() => _.pick(result, ['_id', '_type', '_index', '_version', 'found', '_statusCode', '_status', '_operation']));
             });
@@ -985,14 +1049,18 @@ class IndexerInternal {
     }
 
     update(request) {
-        const operationType = request.partial ? PARTIAL_UPDATE_OP : UPDATE_OP;
+        const updateMode = request.updateMode || UPDATE_MODE_FULL;
+        const isMerge = updateMode === UPDATE_MODE_MERGE;
+        const operationType = isMerge ? MERGE_OP : UPDATE_OP;
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
         const transform = typeConfig.transform;
 
         // TODO: transform may not well behave for partial document
         // TODO: who defines undefined state for transform
         let newDoc = request.doc;
-        if (transform && _.isFunction(transform) && !request.partial) {
+        if (transform && _.isFunction(transform) && !isMerge) {
+            // TODO: ideally all transforms shall be part of pipeline and not here
+            // TODO: or invoke named transform
             newDoc = transform(newDoc) || newDoc;
         }
 
@@ -1022,13 +1090,15 @@ class IndexerInternal {
                 // the merge strategy in case of partial v/s full
                 // when it is partial only the values defined in newDoc gets merged - primitive values v/s object values v/s array values... it's all or none
                 // in case of full update, for any value not defined in newDoc - need to be explicitly marked null
-                if (!request.partial) {
+                if (!isMerge) {
                     _.forOwn(existingDoc, (value, key) => {
                         if (!SignalKeyRegex.test(key) && _.isUndefined(newDoc[key])) {
                             newDoc[key] = null;
                         }
                     });
                 }
+
+                // TODO: as per the measures definition calculate here
 
                 const mergedDoc = _.defaults({}, newDoc, existingDoc);
                 if (typeConfig.weight && _.isFunction(typeConfig.weight)) {
@@ -1039,10 +1109,10 @@ class IndexerInternal {
                     newDoc._lang = typeConfig.lang(mergedDoc);
                 }
 
-                if (request.filter && _.isFunction(request.filter) && !request.filter(newDoc, existingDoc, request.partial)) {
+                if (request.filter && _.isFunction(request.filter) && !request.filter(newDoc, existingDoc, isMerge)) {
                     // if it is filtered by type then remove
-                    if (typeConfig.filter && _.isFunction(typeConfig.filter) && !typeConfig.filter(newDoc, existingDoc, request.partial)) {
-                        return this.remove({typeConfig, id, doc: existingDoc, lockHandle: request.lockHandle, partial: request.partial});
+                    if (typeConfig.filter && _.isFunction(typeConfig.filter) && !typeConfig.filter(newDoc, existingDoc, isMerge)) {
+                        return this.remove({typeConfig, id, doc: existingDoc, lockHandle: request.lockHandle, updateMode});
                     }
 
                     // more of a partial update
@@ -1057,8 +1127,8 @@ class IndexerInternal {
                     };
                 }
 
-                if (typeConfig.filter && _.isFunction(typeConfig.filter) && !typeConfig.filter(newDoc, existingDoc, request.partial)) {
-                    return this.remove({typeConfig, id, doc: existingDoc, lockHandle: request.lockHandle, partial: request.partial});
+                if (typeConfig.filter && _.isFunction(typeConfig.filter) && !typeConfig.filter(newDoc, existingDoc, isMerge)) {
+                    return this.remove({typeConfig, id, doc: existingDoc, lockHandle: request.lockHandle, updateMode});
                 }
 
                 return this.request({method: POST_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}/_update`, body: {doc: newDoc}})
@@ -1066,7 +1136,7 @@ class IndexerInternal {
                   .then(response => {
                       result = response;
 
-                      return this.buildAggregates({typeConfig, newDoc, existingDoc, partial: request.partial, signal: request.signal});
+                      return this.buildAggregates({typeConfig, newDoc, existingDoc, updateMode, signal: request.signal});
                   })
                   .then(() => _.pick(result, ['_id', '_type', '_index', '_version', '_statusCode', '_status', '_operation']));
             });
@@ -1336,6 +1406,8 @@ class IndexerInternal {
             throw new ValidationError('No ID has been specified or can be calculated', {details: {code: 'UNDEFINED_ID'}});
         }
 
+        const updateMode = request.updateMode || UPDATE_MODE_FULL;
+
         const key = `${typeConfig.type}:${id}`;
 
         // for now upsert operation is the only supported for aggregate mode
@@ -1407,7 +1479,7 @@ class IndexerInternal {
                                   }
                               }
 
-                              if (request.partial && _.isUndefined(doc[measureName])) {
+                              if (updateMode === UPDATE_MODE_MERGE && _.isUndefined(doc[measureName])) {
                                   // we skip if new doc does not have value in case of partial update
                                   return true;
                               }
@@ -1466,7 +1538,7 @@ class IndexerInternal {
           Promise.resolve(this.get({typeConfig, id}))
             .then(existingDoc => {
                 if (existingDoc) {
-                    return this.update({typeConfig, id, doc, existingDoc, lockHandle});
+                    return this.update({typeConfig, id, doc, existingDoc, lockHandle, updateMode});
                 }
 
                 return this.add({typeConfig, doc, existingDoc: null, id, lockHandle});
@@ -1475,9 +1547,13 @@ class IndexerInternal {
         return this.lock.usingLock(operation, key, null, (timeTaken) => console.log(Chalk.magenta(`Upserted ${typeConfig.type} #${id} in ${timeTaken}ms`)));
     }
 
-    partialUpdate(request) {
-        return this.update(_.extend(request, {partial: true}));
+    merge(request) {
+        return this.update(_.extend(request, {updateMode: UPDATE_MODE_MERGE}));
     }
+
+    // aggregate(request) {
+    //     return this.update(_.extend(request, {updateMode: 'aggregate'}));
+    // }
 
     // TODO: signal needs to be defined only if a different type of aggregation is needed, than count / sum
     // defineSignal(request) {}
@@ -1536,7 +1612,7 @@ class IndexerInternal {
                 this._aggregateSignals(newDoc, request.signal);
 
                 // TODO: save here could be to the cache
-                return this.partialUpdate({typeConfig, id, doc: newDoc, existingDoc, lockHandle, signal: request.signal});
+                return this.merge({typeConfig, id, doc: newDoc, existingDoc, lockHandle, signal: request.signal});
             });
 
         const key = `${typeConfig.type}:${id}`;
@@ -1620,8 +1696,8 @@ export default class Indexer {
         return this.errorWrap('update', request, this.internal.update(request));
     }
 
-    partialUpdate(headers, request) {
-        return this.errorWrap('partialUpdate', request, this.internal.partialUpdate(request));
+    merge(headers, request) {
+        return this.errorWrap('merge', request, this.internal.merge(request));
     }
 
     addSignal(headers, request) {
@@ -1654,7 +1730,8 @@ export default class Indexer {
             signal: {handler: this.addSignal, method: 'put'},
             upsert: {handler: this.upsert},
             update: {handler: this.update},
-            partialUpdate: {handler: this.partialUpdate},
+            merge: {handler: this.merge},
+            // aggregate: {handler: this.aggregate},
             remove: {handler: this.remove},
             add: {handler: this.add},
             ':type': [
