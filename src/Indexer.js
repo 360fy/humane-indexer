@@ -13,6 +13,8 @@ import AnalysisSetting from './schemas/analysis_setting';
 import * as MappingTypes from './schemas/mapping_types';
 import SearchQueryMapping from './schemas/search_query_mapping';
 
+import * as MeasureFunctions from './MeasureFunctions';
+
 const GET_OP = 'GET';
 const ADD_OP = 'ADD';
 const REMOVE_OP = 'REMOVE';
@@ -38,7 +40,7 @@ const DELETE_HTTP_METHOD = 'DELETE';
 const GET_HTTP_METHOD = 'GET';
 const HEAD_HTTP_METHOD = 'HEAD';
 
-const AGGREGATE_MODE = 'aggregate';
+// const AGGREGATE_MODE = 'aggregate';
 
 const SignalKeyRegex = /_(hourly|daily|weekly|monthly|overall)Stats/;
 
@@ -139,11 +141,9 @@ class IndexerInternal {
                 mapping: SearchQueryMapping,
                 id: (doc) => doc.key,
                 weight: (doc) => doc.count,
-                // measures: { // TODO: handle this
-                //     count: (oldDoc) => _.get(oldDoc, 'count', 0) + 1
-                // }
-                mode: AGGREGATE_MODE,
-                aggregateBuilder: (existingDoc, newDoc) => ({key: newDoc.key, _lang: newDoc._lang, query: newDoc.query, unicodeQuery: newDoc.unicodeQuery, hasResults: newDoc.hasResults})
+                measures: {count: MeasureFunctions.sum('count')}
+                // mode: AGGREGATE_MODE,
+                // aggregateBuilder: (existingDoc, newDoc) => ({key: newDoc.key, _lang: newDoc._lang, query: newDoc.query, unicodeQuery: newDoc.unicodeQuery, hasResults: newDoc.hasResults})
             }
         };
 
@@ -156,6 +156,14 @@ class IndexerInternal {
         this.indicesConfig = _.defaultsDeep(config.indicesConfig, {indices, types: DefaultTypes});
 
         if (this.indicesConfig.aggregators) {
+            let aggregators = this.indicesConfig.aggregators;
+
+            if (_.isFunction(this.indicesConfig.aggregators)) {
+                aggregators = this.indicesConfig.aggregators(MeasureFunctions);
+            }
+
+            this.indicesConfig.aggregators = aggregators;
+
             _.forEach(this.indicesConfig.aggregators, (aggregatorConfig) => {
                 this.enhanceAggregatorTypes(_.get(aggregatorConfig, 'aggregates'), this.indicesConfig);
             });
@@ -639,6 +647,32 @@ class IndexerInternal {
         return this.getFields(request, fields);
     }
 
+    executeMeasures(opType, measureDefinitions, existingAggregateDoc, newAggregateDoc, existingDoc, newDoc) {
+        _.forEach(measureDefinitions, (measureDefinition, measureKey) => {
+            let value = null;
+            if (opType === ADD_OP) {
+                value = measureDefinition.onAdd(existingAggregateDoc, newDoc);
+            } else if (opType === UPDATE_OP) {
+                value = measureDefinition.onUpdate(existingAggregateDoc, existingDoc, newDoc);
+            } else if (opType === REMOVE_OP) {
+                value = measureDefinition.onRemove(existingAggregateDoc, existingDoc);
+            }
+
+            if (!_.isUndefined(value) && !_.isNull(value)) {
+                // modifiers such as log1p are applied here
+                if (measureDefinition.modifier && _.isFunction(measureDefinition.modifier)) {
+                    value = measureDefinition.modifier(value);
+                }
+
+                if (!_.isUndefined(measureDefinition.roundOff) && !_.isNull(measureDefinition.roundOff)) {
+                    value = _.round(value, measureDefinition.roundOff);
+                }
+
+                _.set(newAggregateDoc, measureDefinition.measureField, value);
+            }
+        });
+    }
+
     buildAggregates(request) {
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
         let newDoc = request.newDoc;
@@ -703,13 +737,13 @@ class IndexerInternal {
 
             const key = `${aggregateIndexType}:${id}`;
 
-            const measuresConfig = aggregateConfig.measures || aggregatorsConfig.measures;
+            const measureDefinitions = aggregateConfig.measures || aggregatorsConfig.measures;
 
             const operation = () =>
               Promise.resolve(this.aggregatorCache.retrieve(key))
                 .then(cachedAggregateData => {
                     if (!cachedAggregateData) {
-                        return this.optimisedGet({typeConfig: aggregateIndexConfig, id}, measuresConfig)
+                        return this.optimisedGet({typeConfig: aggregateIndexConfig, id}, measureDefinitions)
                           .then(result => (result && {doc: result, opType: UPDATE_OP, id, type: aggregateIndexType} || null));
                     }
 
@@ -741,87 +775,7 @@ class IndexerInternal {
                         newAggregateDoc = _.extend(newAggregateDoc, aggregate);
                     }
 
-                    _.forEach(measuresConfig, measureConfig => {
-                        let measureType = null;
-                        let measureName = null;
-                        let measureFunction = null;
-                        let measureTypeConfig = null;
-
-                        if (_.isString(measureConfig)) {
-                            measureName = measureConfig;
-                            measureType = 'SUM';
-                        } else if (_.isObject(measureConfig)) {
-                            const config = _.first(_.toPairs(measureConfig));
-                            measureName = config[0];
-                            if (_.isString(config[1])) {
-                                measureType = config[1];
-                            } else if (_.isFunction(config[1])) {
-                                measureType = 'FUNCTION';
-                                measureFunction = config[1];
-                            } else if (_.isObject(config[1])) {
-                                measureType = config[1].type;
-                                measureTypeConfig = config[1];
-                            }
-                        }
-
-                        if (isMerge && _.isUndefined(newDoc[measureName])) {
-                            // we skip if new doc does not have value in case of partial update
-                            return true;
-                        }
-
-                        let value = _.get(existingAggregateDoc, measureName, 0);
-
-                        if (measureType === 'COUNT') {
-                            if (aggregateOpType === ADD_OP) {
-                                // simply SUM the values here
-                                value += 1;
-                            } else if (aggregateOpType === REMOVE_OP) {
-                                // simply REDUCE the values here
-                                value -= 1;
-                            }
-                        } else if (measureType === 'SUM') {
-                            if (aggregateOpType === ADD_OP) {
-                                value += _.get(newDoc, measureName, 0);
-                            } else if (aggregateOpType === UPDATE_OP) {
-                                value += (_.get(newDoc, measureName, 0) - _.get(existingDoc, measureName, 0));
-                            } else if (aggregateOpType === REMOVE_OP) {
-                                // simply REDUCE the values here
-                                value -= _.get(existingDoc, measureName, 0);
-                            }
-                        } else if (measureType === 'AVERAGE' || measureType === 'WEIGHTED_AVERAGE') {
-                            let totalCount = 0;
-                            let totalValue = 0;
-
-                            const countField = (measureType === 'AVERAGE') ? measureTypeConfig.count : measureTypeConfig.weight;
-
-                            value = value * _.get(existingAggregateDoc, measureTypeConfig.count, 0);
-                            if (aggregateOpType === ADD_OP) {
-                                totalCount = _.get(existingAggregateDoc, countField, 0) + _.get(newDoc, countField, 0);
-                                totalValue = value + _.get(newDoc, measureName, 0) * _.get(newDoc, countField, 0);
-                            } else if (aggregateOpType === UPDATE_OP) {
-                                totalCount = _.get(existingAggregateDoc, countField, 0) - _.get(existingDoc, countField, 0) + _.get(newDoc, countField, 0);
-                                totalValue = value - _.get(existingDoc, measureName, 0) * _.get(existingDoc, countField, 0) + _.get(newDoc, measureName, 0) * _.get(newDoc, countField, 0);
-                            } else if (aggregateOpType === REMOVE_OP) {
-                                totalCount = _.get(existingAggregateDoc, countField, 0) - _.get(existingDoc, countField, 0);
-                                totalValue = value - _.get(existingDoc, measureName, 0) * _.get(existingDoc, countField, 0);
-                            }
-
-                            value = _.round(totalCount > 0 ? totalValue / totalCount : 0, measureTypeConfig.round || 3);
-                        } else if (measureType === 'FUNCTION') {
-                            value = measureFunction(newAggregateDoc, aggregateOpType);
-
-                            const modifier = measureTypeConfig && measureTypeConfig.modifier || 'log1p';
-                            if (modifier) {
-                                value = _.invoke(Math, 'log1p', value);
-                            }
-
-                            value = _.round(value, measureTypeConfig && measureTypeConfig.round || 3);
-                        }
-
-                        newAggregateDoc[measureName] = value;
-
-                        return true;
-                    });
+                    this.executeMeasures(aggregateOpType, measureDefinitions, existingAggregateDoc, newAggregateDoc, existingDoc, newDoc);
 
                     return this.aggregatorCache.store(key, {doc: newAggregateDoc, existingDoc: existingAggregateDoc, opType, id, type: aggregateIndexType});
                 });
@@ -1001,6 +955,10 @@ class IndexerInternal {
                     return {_id: id, _type: typeConfig.type, _index: typeConfig.index, _statusCode: 404, _status: FAIL_STATUS, _failCode: 'EXISTS_ALREADY', _operation: operationType};
                 }
 
+                if (typeConfig.measures) {
+                    this.executeMeasures(ADD_OP, typeConfig.measures, null, doc, null, doc);
+                }
+
                 return this.request({method: PUT_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}`, body: doc})
                   .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
                   .then(response => {
@@ -1098,7 +1056,9 @@ class IndexerInternal {
                     });
                 }
 
-                // TODO: as per the measures definition calculate here
+                if (typeConfig.measures) {
+                    this.executeMeasures(UPDATE_OP, typeConfig.measures, existingDoc, newDoc, existingDoc, newDoc);
+                }
 
                 const mergedDoc = _.defaults({}, newDoc, existingDoc);
                 if (typeConfig.weight && _.isFunction(typeConfig.weight)) {
@@ -1398,7 +1358,7 @@ class IndexerInternal {
         const typeConfig = this.typeConfig(request.typeConfig || request.type);
         const doc = request.doc;
 
-        const mode = typeConfig.mode;
+        // const mode = typeConfig.mode;
 
         const id = typeConfig.id(doc);
 
@@ -1409,130 +1369,6 @@ class IndexerInternal {
         const updateMode = request.updateMode || UPDATE_MODE_FULL;
 
         const key = `${typeConfig.type}:${id}`;
-
-        // for now upsert operation is the only supported for aggregate mode
-        if (mode && mode === AGGREGATE_MODE) {
-            const aggregateOperation = () => {
-                let startTime = null;
-
-                if (this.logLevel === TRACE_LOG_LEVEL) {
-                    startTime = performanceNow();
-                }
-
-                return Promise.resolve(this.aggregatorCache.retrieve(key))
-                  .then(cachedAggregateData => {
-                      if (!cachedAggregateData) {
-                          return this.optimisedGet({typeConfig, id}, typeConfig.measures)
-                            .then(result => (result && {doc: result, opType: UPDATE_OP, id, type: typeConfig.type} || null));
-                      }
-
-                      return cachedAggregateData;
-                  })
-                  .then(existingAggregateData => {
-                      const aggregateOpType = ADD_OP;
-
-                      const aggregateDoc = typeConfig.aggregateBuilder(existingAggregateData && existingAggregateData.doc, doc);
-
-                      const measuresConfig = typeConfig.measures;
-
-                      let existingAggregateDoc = null;
-                      let newAggregateDoc = {};
-
-                      // aggregate already exist
-                      if (existingAggregateData && existingAggregateData.doc) {
-                          existingAggregateDoc = existingAggregateData.doc;
-                          newAggregateDoc = _.extend(newAggregateDoc, existingAggregateDoc, aggregateDoc);
-                      } else {
-                          existingAggregateDoc = {};
-                          newAggregateDoc = _.extend(newAggregateDoc, aggregateDoc);
-                      }
-
-                      // aggregating into _dailyStats, _weeklyStats, _monthlyStats, _overallStats
-                      // signals will come separate in request
-                      // signals: [{name: 'signal', timeUnit: '', timeInUnit: '', value: }]
-                      if (request.signal) {
-                          this._aggregateSignals(newAggregateDoc, request.signal);
-                      }
-
-                      if (measuresConfig) {
-                          // aggregating as per measuresConfig
-                          _.forEach(measuresConfig, measureConfig => {
-                              let measureType = null;
-                              let measureName = null;
-                              let measureFunction = null;
-                              let measureTypeConfig = null;
-
-                              if (_.isString(measureConfig)) {
-                                  measureName = measureConfig;
-                                  measureType = 'SUM';
-                              } else if (_.isObject(measureConfig)) {
-                                  const config = _.first(_.toPairs(measureConfig));
-                                  measureName = config[0];
-                                  if (_.isString(config[1])) {
-                                      measureType = config[1];
-                                  } else if (_.isFunction(config[1])) {
-                                      measureType = 'FUNCTION';
-                                      measureFunction = config[1];
-                                  } else if (_.isObject(config[1])) {
-                                      measureType = config[1].type;
-                                      measureTypeConfig = config[1];
-                                  }
-                              }
-
-                              if (updateMode === UPDATE_MODE_MERGE && _.isUndefined(doc[measureName])) {
-                                  // we skip if new doc does not have value in case of partial update
-                                  return true;
-                              }
-
-                              let value = _.get(existingAggregateDoc, measureName, 0);
-
-                              if (measureType === 'COUNT') {
-                                  value += 1;
-                              } else if (measureType === 'SUM') {
-                                  value += _.get(doc, measureName, 0);
-                              } else if (measureType === 'AVERAGE' || measureType === 'WEIGHTED_AVERAGE') {
-                                  const countField = (measureType === 'AVERAGE') ? measureTypeConfig.count : measureTypeConfig.weight;
-
-                                  const totalValue = value * _.get(existingAggregateDoc, countField, 0) + _.get(doc, measureName, 0) * _.get(doc, countField, 0);
-                                  const totalCount = _.get(existingAggregateDoc, countField, 0) + _.get(doc, countField, 0);
-
-                                  value = _.round(totalCount > 0 ? totalValue / totalCount : 0, measureTypeConfig.round || 3);
-                              } else if (measureType === 'FUNCTION') {
-                                  value = measureFunction(newAggregateDoc, aggregateOpType);
-
-                                  const modifier = measureTypeConfig && measureTypeConfig.modifier || 'log1p';
-                                  if (modifier) {
-                                      value = _.invoke(Math, 'log1p', value);
-                                  }
-
-                                  value = _.round(value, measureTypeConfig && measureTypeConfig.round || 3);
-                              }
-
-                              newAggregateDoc[measureName] = value;
-
-                              return true;
-                          });
-                      }
-
-                      if (this.logLevel === TRACE_LOG_LEVEL) {
-                          console.log('Aggregation time: ', key, (performanceNow() - startTime).toFixed(3));
-                      }
-
-                      return this.aggregatorCache.store(key, {doc: newAggregateDoc, existingDoc: existingAggregateDoc, opType: existingAggregateDoc.opType || ADD_OP, id, type: typeConfig.type});
-                  })
-                  .then(() => {
-                      if (this.logLevel === TRACE_LOG_LEVEL) {
-                          console.log('Finished aggregate upsert: ', key, (performanceNow() - startTime).toFixed(3));
-                      }
-
-                      return {_statusCode: 200, _status: SUCCESS_STATUS, _id: id, _type: typeConfig.type, _index: typeConfig.index, _operation: 'LAZY_AGGREGATE'};
-                  });
-            };
-
-            return this.aggregatorCache.ensureFlushComplete()
-              .then(() =>
-                this.lock.usingLock(aggregateOperation, key, null, (timeTaken) => console.log(Chalk.magenta(`Upserted ${typeConfig.type} #${id} in ${timeTaken}ms`))));
-        }
 
         const operation = (lockHandle) =>
           Promise.resolve(this.get({typeConfig, id}))
@@ -1550,10 +1386,6 @@ class IndexerInternal {
     merge(request) {
         return this.update(_.extend(request, {updateMode: UPDATE_MODE_MERGE}));
     }
-
-    // aggregate(request) {
-    //     return this.update(_.extend(request, {updateMode: 'aggregate'}));
-    // }
 
     // TODO: signal needs to be defined only if a different type of aggregation is needed, than count / sum
     // defineSignal(request) {}
