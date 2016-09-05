@@ -1,5 +1,316 @@
 import _ from 'lodash';
 
+export function max(measureField, srcField) {
+    // TODO: measureField must be specified
+
+    return {
+        measureField,
+
+        fields: [measureField, srcField],
+
+        onAdd: (aggregateDoc, addedDoc) => _.max(_.get(aggregateDoc, measureField, 0), _.get(addedDoc, srcField, 0)),
+
+        onRemove: (aggregateDoc /*, removedDoc*/) => _.get(aggregateDoc, measureField, 0),
+
+        onUpdate: (aggregateDoc, oldDoc, updatedDoc) => _.max(_.get(aggregateDoc, measureField, 0), _.get(updatedDoc, srcField, 0))
+    };
+}
+
+export function min(measureField, srcField) {
+    // TODO: measureField must be specified
+
+    return {
+        measureField,
+
+        fields: [measureField, srcField],
+
+        onAdd: (aggregateDoc, addedDoc) => _.max(_.get(aggregateDoc, measureField, 0), _.get(addedDoc, srcField, 0)),
+
+        onRemove: (aggregateDoc /*, removedDoc*/) => _.get(aggregateDoc, measureField, 0),
+
+        onUpdate: (aggregateDoc, oldDoc, updatedDoc) => _.max(_.get(aggregateDoc, measureField, 0), _.get(updatedDoc, srcField, 0))
+    };
+}
+
+export function range(measureField, srcField) {
+    // TODO: measureField must be specified
+
+    if (!srcField) {
+        srcField = measureField;
+    }
+
+    return {
+        measureField,
+
+        fields: [measureField, srcField],
+
+        onAdd: (aggregateDoc, addedDoc) => {
+            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, values: []});
+
+            const srcValue = _.get(addedDoc, srcField, 0);
+
+            let found = false;
+            _.forEach(measureValue.values, value => {
+                if (value.key === srcValue) {
+                    found = true;
+                    value.count++;
+                }
+            });
+
+            if (!found) {
+                measureValue.values.push({key: srcValue, count: 1});
+                if (_.isNull(measureValue.min) || measureValue.min > srcValue) {
+                    measureValue.min = srcValue;
+                }
+
+                if (_.isNull(measureValue.max) || measureValue.max < srcValue) {
+                    measureValue.max = srcValue;
+                }
+            }
+
+            return measureValue;
+        },
+
+        onRemove: (aggregateDoc, removedDoc) => {
+            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, values: []});
+
+            const srcValue = _.get(removedDoc, srcField, 0);
+
+            let indexToDelete = -1;
+            _.forEach(measureValue.values, (value, index) => {
+                if (value.key === srcValue) {
+                    value.count--;
+
+                    if (value.count === 0) {
+                        // remove this entry from measureValue.values
+                        indexToDelete = index;
+                    }
+                }
+            });
+
+            if (indexToDelete >= 0) {
+                _.pullAt(measureValue.values, indexToDelete);
+
+                // update min and max too
+                if (_.isNull(measureValue.min) || measureValue.min > srcValue) {
+                    const minValue = _.minBy(measureValue.values, (value) => value.key);
+                    if (minValue) {
+                        measureValue.min = minValue.key;
+                    } else {
+                        measureValue.min = null;
+                    }
+                }
+
+                if (_.isNull(measureValue.max) || measureValue.max < srcValue) {
+                    const maxValue = _.maxBy(measureValue.values, (value) => value.key);
+                    if (maxValue) {
+                        measureValue.max = maxValue.key;
+                    } else {
+                        measureValue.max = null;
+                    }
+                }
+            }
+
+            return measureValue;
+        },
+
+        onUpdate: (aggregateDoc, oldDoc, updatedDoc) => {
+            _.max(_.get(aggregateDoc, measureField, 0), _.get(updatedDoc, srcField, 0));
+
+            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, values: []});
+
+            const oldValue = _.get(oldDoc, srcField, 0);
+            const updatedValue = _.get(updatedDoc, srcField, 0);
+
+            let indexToDelete = -1;
+            let found = false;
+            _.forEach(measureValue.values, (value, index) => {
+                if (value.key === oldValue) {
+                    value.count--;
+
+                    if (value.count === 0) {
+                        // remove this entry from measureValue.values
+                        indexToDelete = index;
+                    }
+                }
+
+                if (value.key === updatedValue) {
+                    found = true;
+                    value.count++;
+                }
+            });
+
+            if (!found) {
+                measureValue.values.push({key: updatedValue, count: 1});
+            }
+
+            if (indexToDelete >= 0) {
+                _.pullAt(measureValue.values, indexToDelete);
+            }
+
+            // update min and max too
+            if (_.isNull(measureValue.min) || measureValue.min > oldValue) {
+                const minValue = _.minBy(measureValue.values, (value) => value.key);
+                if (minValue) {
+                    measureValue.min = minValue.key;
+                } else {
+                    measureValue.min = null;
+                }
+            }
+
+            if (_.isNull(measureValue.max) || measureValue.max < oldValue) {
+                const maxValue = _.maxBy(measureValue.values, (value) => value.key);
+                if (maxValue) {
+                    measureValue.max = maxValue.key;
+                } else {
+                    measureValue.max = null;
+                }
+            }
+
+            return measureValue;
+        }
+    };
+}
+
+export function list(measureField, srcField, idFn) {
+    // TODO: measureField must be specified
+
+    if (!srcField) {
+        srcField = measureField;
+    }
+
+    if (!idFn) {
+        idFn = (value) => value;
+    }
+
+    return {
+        measureField,
+
+        fields: [measureField, srcField],
+
+        onAdd: (aggregateDoc, addedDoc) => {
+            const measureValue = _.get(aggregateDoc, measureField, []);
+
+            let srcValues = _.get(addedDoc, srcField);
+
+            if (!srcValues) {
+                return measureValue;
+            }
+
+            if (!_.isArray(srcValues)) {
+                srcValues = [srcValues];
+            }
+
+            let found = false;
+            _.forEach(srcValues, srcValue => {
+                _.forEach(measureValue, value => {
+                    if (idFn(value) === idFn(srcValue)) {
+                        found = true;
+
+                        if (_.isObject(value)) {
+                            value.__count__++;
+                        }
+                    }
+                });
+
+                if (!found) {
+                    if (_.isObject(srcValue)) {
+                        srcValue.__count__ = 1;
+                    }
+
+                    measureValue.push(srcValue);
+                }
+            });
+
+            return measureValue;
+        },
+
+        onRemove: (aggregateDoc, removedDoc) => {
+            const measureValue = _.get(aggregateDoc, measureField, []);
+
+            let srcValues = _.get(removedDoc, srcField);
+
+            if (!srcValues) {
+                return measureValue;
+            }
+
+            if (!_.isArray(srcValues)) {
+                srcValues = [srcValues];
+            }
+
+            _.forEach(srcValues, srcValue => {
+                let indexToDelete = -1;
+
+                _.forEach(measureValue, (value, index) => {
+                    if (idFn(value) === idFn(srcValue)) {
+                        if (_.isObject(value)) {
+                            value.__count__--;
+                            if (value.__count__ === 0) {
+                                // remove this entry from measureValue
+                                indexToDelete = index;
+                            }
+                        }
+                    }
+                });
+
+                if (indexToDelete >= 0) {
+                    _.pullAt(measureValue, indexToDelete);
+                }
+            });
+
+            return measureValue;
+        },
+
+        onUpdate: (aggregateDoc, oldDoc, updatedDoc) => {
+            _.max(_.get(aggregateDoc, measureField, 0), _.get(updatedDoc, srcField, 0));
+
+            const measureValue = _.get(aggregateDoc, measureField, []);
+
+            const oldValues = _.get(oldDoc, srcField);
+            const updatedValues = _.get(updatedDoc, srcField);
+
+            _.forEach(oldValues, oldValue => {
+                let indexToDelete = -1;
+
+                _.forEach(measureValue, (value, index) => {
+                    if (idFn(value) === idFn(oldValue)) {
+                        if (_.isObject(value)) {
+                            value.__count__--;
+                            if (value.__count__ === 0) {
+                                // remove this entry from measureValue
+                                indexToDelete = index;
+                            }
+                        }
+                    }
+                });
+
+                if (indexToDelete >= 0) {
+                    _.pullAt(measureValue, indexToDelete);
+                }
+            });
+
+            _.forEach(updatedValues, updatedValue => {
+                let found = false;
+
+                _.forEach(measureValue, (value) => {
+                    if (idFn(value) === idFn(updatedValue)) {
+                        if (_.isObject(value)) {
+                            value.__count__++;
+                            found = true;
+                        }
+                    }
+                });
+
+                if (!found) {
+                    measureValue.push(updatedValue);
+                }
+            });
+
+            return measureValue;
+        }
+    };
+}
+
 export function count(measureField) {
     // if field is not specified then assumes 'count' field
     if (!measureField) {
