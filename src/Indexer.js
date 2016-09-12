@@ -12,6 +12,7 @@ import AggregatorCache from './AggregatorCache';
 import AnalysisSetting from './schemas/analysis_setting';
 import * as MappingTypes from './schemas/mapping_types';
 import SearchQueryMapping from './schemas/search_query_mapping';
+import IntentMapping from './schemas/intent_mapping';
 
 import * as MeasureFunctions from './MeasureFunctions';
 
@@ -137,13 +138,18 @@ class IndexerInternal {
         const DefaultTypes = {
             searchQuery: {
                 index: 'search_query',
-                did_you_mean_enabled: false,
+                // did_you_mean_enabled: false,
                 mapping: SearchQueryMapping,
                 id: (doc) => doc.key,
                 weight: (doc) => doc.count,
                 measures: {count: MeasureFunctions.sum('count')}
                 // mode: AGGREGATE_MODE,
                 // aggregateBuilder: (existingDoc, newDoc) => ({key: newDoc.key, _lang: newDoc._lang, query: newDoc.query, unicodeQuery: newDoc.unicodeQuery, hasResults: newDoc.hasResults})
+            },
+            intent: {
+                index: 'intent',
+                did_you_mean_enabled: true,
+                mapping: IntentMapping
             }
         };
 
@@ -454,7 +460,7 @@ class IndexerInternal {
                           settings: {
                               index: _.defaultsDeep(indexConfig.indexSettings, {
                                   number_of_shards: 2,
-                                  did_you_mean_enabled: true,
+                                  did_you_mean_enabled: false,
                                   did_you_mean_index_name: `${_.toLower(this.instanceName)}:did_you_mean_store`
                               }),
                               analysis: indexConfig.analysis
@@ -491,7 +497,7 @@ class IndexerInternal {
                 settings: {
                     index: _.defaultsDeep(indexConfig.indexSettings, {
                         number_of_shards: 2,
-                        did_you_mean_enabled: true,
+                        did_you_mean_enabled: false,
                         did_you_mean_index_name: null
                     }),
                     analysis: indexConfig.analysis
