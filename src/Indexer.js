@@ -299,7 +299,7 @@ class IndexerInternal {
         }
 
         if (!type.id) {
-            type.id = (doc) => doc.id;
+            type.id = (doc) => _.get(doc, 'id', null);
         }
     }
 
