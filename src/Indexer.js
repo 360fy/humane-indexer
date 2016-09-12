@@ -722,7 +722,7 @@ class IndexerInternal {
                 }
 
                 const aggregate = aggregateConfig.aggregateBuilder(doc, fieldValue);
-                const id = _.isFunction(aggregateConfig.indexType.id) && aggregateConfig.indexType.id(aggregate) || aggregate.id;
+                const id = _.isFunction(aggregateConfig.indexType.id) && aggregateConfig.indexType.id(aggregate) || _.get(aggregate, 'id', null);
 
                 if (id && aggregate) {
                     aggregates.push({id, aggregate});
