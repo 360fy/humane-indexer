@@ -45,12 +45,12 @@ export function range(measureField, srcField) {
         fields: [measureField, srcField],
 
         onAdd: (aggregateDoc, addedDoc) => {
-            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, values: []});
+            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, __values_internal__: []});
 
             const srcValue = _.get(addedDoc, srcField, 0);
 
             let found = false;
-            _.forEach(measureValue.values, value => {
+            _.forEach(measureValue.__values_internal__, value => {
                 if (value.key === srcValue) {
                     found = true;
                     value.count++;
@@ -58,7 +58,7 @@ export function range(measureField, srcField) {
             });
 
             if (!found) {
-                measureValue.values.push({key: srcValue, count: 1});
+                measureValue.__values_internal__.push({key: srcValue, count: 1});
                 if (_.isNull(measureValue.min) || measureValue.min > srcValue) {
                     measureValue.min = srcValue;
                 }
@@ -72,28 +72,28 @@ export function range(measureField, srcField) {
         },
 
         onRemove: (aggregateDoc, removedDoc) => {
-            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, values: []});
+            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, __values_internal__: []});
 
             const srcValue = _.get(removedDoc, srcField, 0);
 
             let indexToDelete = -1;
-            _.forEach(measureValue.values, (value, index) => {
+            _.forEach(measureValue.__values_internal__, (value, index) => {
                 if (value.key === srcValue) {
                     value.count--;
 
                     if (value.count === 0) {
-                        // remove this entry from measureValue.values
+                        // remove this entry from measureValue.__values_internal__
                         indexToDelete = index;
                     }
                 }
             });
 
             if (indexToDelete >= 0) {
-                _.pullAt(measureValue.values, indexToDelete);
+                _.pullAt(measureValue.__values_internal__, indexToDelete);
 
                 // update min and max too
                 if (_.isNull(measureValue.min) || measureValue.min > srcValue) {
-                    const minValue = _.minBy(measureValue.values, (value) => value.key);
+                    const minValue = _.minBy(measureValue.__values_internal__, (value) => value.key);
                     if (minValue) {
                         measureValue.min = minValue.key;
                     } else {
@@ -102,7 +102,7 @@ export function range(measureField, srcField) {
                 }
 
                 if (_.isNull(measureValue.max) || measureValue.max < srcValue) {
-                    const maxValue = _.maxBy(measureValue.values, (value) => value.key);
+                    const maxValue = _.maxBy(measureValue.__values_internal__, (value) => value.key);
                     if (maxValue) {
                         measureValue.max = maxValue.key;
                     } else {
@@ -117,19 +117,19 @@ export function range(measureField, srcField) {
         onUpdate: (aggregateDoc, oldDoc, updatedDoc) => {
             _.max(_.get(aggregateDoc, measureField, 0), _.get(updatedDoc, srcField, 0));
 
-            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, values: []});
+            const measureValue = _.get(aggregateDoc, measureField, {min: null, max: null, __values_internal__: []});
 
             const oldValue = _.get(oldDoc, srcField, 0);
             const updatedValue = _.get(updatedDoc, srcField, 0);
 
             let indexToDelete = -1;
             let found = false;
-            _.forEach(measureValue.values, (value, index) => {
+            _.forEach(measureValue.__values_internal__, (value, index) => {
                 if (value.key === oldValue) {
                     value.count--;
 
                     if (value.count === 0) {
-                        // remove this entry from measureValue.values
+                        // remove this entry from measureValue.__values_internal__
                         indexToDelete = index;
                     }
                 }
@@ -141,16 +141,16 @@ export function range(measureField, srcField) {
             });
 
             if (!found) {
-                measureValue.values.push({key: updatedValue, count: 1});
+                measureValue.__values_internal__.push({key: updatedValue, count: 1});
             }
 
             if (indexToDelete >= 0) {
-                _.pullAt(measureValue.values, indexToDelete);
+                _.pullAt(measureValue.__values_internal__, indexToDelete);
             }
 
             // update min and max too
             if (_.isNull(measureValue.min) || measureValue.min > oldValue) {
-                const minValue = _.minBy(measureValue.values, (value) => value.key);
+                const minValue = _.minBy(measureValue.__values_internal__, (value) => value.key);
                 if (minValue) {
                     measureValue.min = minValue.key;
                 } else {
@@ -159,7 +159,7 @@ export function range(measureField, srcField) {
             }
 
             if (_.isNull(measureValue.max) || measureValue.max < oldValue) {
-                const maxValue = _.maxBy(measureValue.values, (value) => value.key);
+                const maxValue = _.maxBy(measureValue.__values_internal__, (value) => value.key);
                 if (maxValue) {
                     measureValue.max = maxValue.key;
                 } else {
@@ -208,14 +208,14 @@ export function list(measureField, srcField, idFn) {
                         found = true;
 
                         if (_.isObject(value)) {
-                            value.__count__++;
+                            value.__count_internal__++;
                         }
                     }
                 });
 
                 if (!found) {
                     if (_.isObject(srcValue)) {
-                        srcValue.__count__ = 1;
+                        srcValue.__count_internal__ = 1;
                     }
 
                     measureValue.push(srcValue);
@@ -244,8 +244,8 @@ export function list(measureField, srcField, idFn) {
                 _.forEach(measureValue, (value, index) => {
                     if (idFn(value) === idFn(srcValue)) {
                         if (_.isObject(value)) {
-                            value.__count__--;
-                            if (value.__count__ === 0) {
+                            value.__count_internal__--;
+                            if (value.__count_internal__ === 0) {
                                 // remove this entry from measureValue
                                 indexToDelete = index;
                             }
@@ -275,8 +275,8 @@ export function list(measureField, srcField, idFn) {
                 _.forEach(measureValue, (value, index) => {
                     if (idFn(value) === idFn(oldValue)) {
                         if (_.isObject(value)) {
-                            value.__count__--;
-                            if (value.__count__ === 0) {
+                            value.__count_internal__--;
+                            if (value.__count_internal__ === 0) {
                                 // remove this entry from measureValue
                                 indexToDelete = index;
                             }
@@ -295,7 +295,7 @@ export function list(measureField, srcField, idFn) {
                 _.forEach(measureValue, (value) => {
                     if (idFn(value) === idFn(updatedValue)) {
                         if (_.isObject(value)) {
-                            value.__count__++;
+                            value.__count_internal__++;
                             found = true;
                         }
                     }
