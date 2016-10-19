@@ -141,13 +141,13 @@ This method does full update of document of given type and id.
 
 - ERROR RESPONSES   : Same as method 1
 
-### Partial Update
+### Merge
 
-This method is optimised for partial updates of given type and id.
+This method merges given data with existing data of given type and id.
 
 - TYPE  : `POST`
 
-- URL   : `/partialUpdate`
+- URL   : `/merge`
 
 - BODY  : `{type: <type>, id: <id>, doc: <data>}`
 
@@ -186,7 +186,7 @@ This method is optimised for partial updates of given type and id.
             "_statusCode": 404,
             "_status": "FAIL",
             "_failCode": "NOT_FOUND",
-            "_operation": "PARTIAL_UPDATE",
+            "_operation": "MERGE",
             "serviceTimeTaken": "16.548"
           }
           ```
@@ -195,7 +195,7 @@ This method is optimised for partial updates of given type and id.
 
 ### Upsert
 
-This method adds data of given type if it does not exist, else updates.
+This method adds data of given type if it does not exist, else makes full update.
 
 ###### **Method 1**
 
@@ -356,5 +356,3 @@ This method removes document of given type and id.
         "_errorId": 1458819775194
       }
       ```
-
-## Configuration
