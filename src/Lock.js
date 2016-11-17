@@ -1,7 +1,6 @@
 import Promise from 'bluebird';
 import RedisLock from 'redislock';
 import SemLocks from 'semlocks';
-
 import performanceNow from 'performance-now';
 
 const LockAcquisitionError = RedisLock.LockAcquisitionError;
@@ -29,7 +28,7 @@ class DistributedLock {
 
     acquire(key) {
         key = this.redisKeyPrefix + key;
-        
+
         let acquireStartTime = null;
         if (this.logLevel === 'trace') {
             acquireStartTime = performanceNow();
@@ -111,7 +110,8 @@ class LocalLock {
                 }
 
                 resolve({
-                    key, release: () => {
+                    key,
+                    release: () => {
                         // let lockReleaseStartTime = null;
 
                         if (this.logLevel === 'trace') {
@@ -173,7 +173,7 @@ export default class Lock {
 
         if (lockHandle) {
             return Promise.resolve(operation(lockHandle))
-              .then(result => {
+              .then((result) => {
                   if (log) log((performanceNow() - startTime).toFixed(3));
 
                   return result;
@@ -186,14 +186,14 @@ export default class Lock {
 
         return Promise.resolve(this.acquire(key))
 
-          .then(handle => {
+          .then((handle) => {
               lockHandle = handle;
 
               opStartTime = performanceNow();
 
               return operation(lockHandle);
           })
-          .then(result => {
+          .then((result) => {
               if (this.logLevel === 'trace') {
                   console.log('Operation time: ', (performanceNow() - opStartTime).toFixed(3));
               }

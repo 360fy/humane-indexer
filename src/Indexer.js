@@ -13,7 +13,6 @@ import AnalysisSetting from './schemas/analysis_setting';
 import * as MappingTypes from './schemas/mapping_types';
 import SearchQueryMapping from './schemas/search_query_mapping';
 import IntentMapping from './schemas/intent_mapping';
-
 import * as MeasureFunctions from './MeasureFunctions';
 
 const GET_OP = 'GET';
@@ -125,7 +124,7 @@ class IndexerInternal {
         this.logLevel = config.logLevel || INFO_LOG_LEVEL;
         this.instanceName = config.instanceName;
 
-        this.request = Request.builder(_.extend({}, config.esConfig, {logLevel: this.logLevel, baseUrl: config.esConfig && config.esConfig.url || 'http://localhost:9200'}));
+        this.request = Request.builder(_.extend({}, config.esConfig, {logLevel: this.logLevel, baseUrl: (config.esConfig && config.esConfig.url) || 'http://localhost:9200'}));
 
         if (config.redisConfig || config.redisSentinelConfig) {
             this.redisClient = buildRedisClient(_.pick(config, ['redisConfig', 'redisSentinelConfig']));
@@ -138,17 +137,17 @@ class IndexerInternal {
         const DefaultTypes = {
             searchQuery: {
                 index: 'search_query',
-                // did_you_mean_enabled: false,
+                // word_index_enabled: false,
                 mapping: SearchQueryMapping,
-                id: (doc) => doc.key,
-                weight: (doc) => doc.count,
+                id: doc => doc.key,
+                weight: doc => doc.count,
                 measures: {count: MeasureFunctions.sum('count')}
                 // mode: AGGREGATE_MODE,
                 // aggregateBuilder: (existingDoc, newDoc) => ({key: newDoc.key, _lang: newDoc._lang, query: newDoc.query, unicodeQuery: newDoc.unicodeQuery, hasResults: newDoc.hasResults})
             },
             intent: {
                 index: 'intent',
-                did_you_mean_enabled: true,
+                word_index_enabled: true,
                 mapping: IntentMapping
             }
         };
@@ -176,6 +175,7 @@ class IndexerInternal {
         }
     }
 
+    // eslint-disable-next-line class-methods-use-this
     enhanceAggregatorTypes(types, indicesConfig) {
         if (!types) {
             return;
@@ -212,9 +212,9 @@ class IndexerInternal {
                 analysis: AnalysisSetting
             };
 
-            if (!_.isUndefined(type.did_you_mean_enabled)) {
+            if (!_.isUndefined(type.word_index_enabled)) {
                 index.indexSettings = {
-                    did_you_mean_enabled: type.did_you_mean_enabled
+                    word_index_enabled: type.word_index_enabled
                 };
             }
         }
@@ -299,7 +299,7 @@ class IndexerInternal {
         }
 
         if (!type.id) {
-            type.id = (doc) => _.get(doc, 'id', null);
+            type.id = doc => _.get(doc, 'id', null);
         }
     }
 
@@ -409,7 +409,7 @@ class IndexerInternal {
         if (!indexKey) {
             const promises = _(this.indicesConfig.indices)
               .values()
-              .map((indexConfig) => this.request({method: DELETE_HTTP_METHOD, uri: `${indexConfig.store}`}))
+              .map(indexConfig => this.request({method: DELETE_HTTP_METHOD, uri: `${indexConfig.store}`}))
               .value();
 
             return Promise.all(promises)
@@ -443,11 +443,10 @@ class IndexerInternal {
                   _(this.indicesConfig.types)
                     .values()
                     .filter(type => type.index === indexConfig.store)
-                    .forEach(type => {
+                    .forEach((type) => {
                         mappings[type.type] = {
-                            _all: {
-                                enabled: false
-                            },
+                            include_in_all: false,
+                            dynamic: false,
                             dynamic_templates: type.dynamic_templates,
                             properties: _.mapValues(type.mapping, property => this.getMapping(property))
                         };
@@ -460,8 +459,8 @@ class IndexerInternal {
                           settings: {
                               index: _.defaultsDeep(indexConfig.indexSettings, {
                                   number_of_shards: 2,
-                                  did_you_mean_enabled: false,
-                                  did_you_mean_index_name: `${_.toLower(this.instanceName)}:did_you_mean_store`
+                                  word_index_enabled: false
+                                  // word_index_name: `${_.toLower(this.instanceName)}:word_store`
                               }),
                               analysis: indexConfig.analysis
                           },
@@ -482,23 +481,24 @@ class IndexerInternal {
         _(this.indicesConfig.types)
           .values()
           .filter(type => type.index === indexConfig.store)
-          .forEach(type => {
+          .forEach((type) => {
               mappings[type.type] = {
-                  _all: {
-                      enabled: false
-                  },
+                  include_in_all: false,
+                  dynamic: false,
                   dynamic_templates: type.dynamic_templates,
                   properties: _.mapValues(type.mapping, property => this.getMapping(property))
               };
           });
 
         return this.request({
-            method: PUT_HTTP_METHOD, uri: `${indexConfig.store}`, body: {
+            method: PUT_HTTP_METHOD,
+            uri: `${indexConfig.store}`,
+            body: {
                 settings: {
                     index: _.defaultsDeep(indexConfig.indexSettings, {
                         number_of_shards: 2,
-                        did_you_mean_enabled: false,
-                        did_you_mean_index_name: null
+                        word_index_enabled: false
+                        // word_index_name: null
                     }),
                     analysis: indexConfig.analysis
                 },
@@ -531,8 +531,8 @@ class IndexerInternal {
     //             settings: {
     //                 index: _.defaultsDeep(indexConfig.indexSettings, {
     //                     number_of_shards: 2,
-    //                     did_you_mean_enabled: true,
-    //                     did_you_mean_index_name: null
+    //                     word_index_enabled: true,
+    //                     word_index_name: null
     //                 }),
     //                 analysis: indexConfig.analysis
     //             },
@@ -564,8 +564,8 @@ class IndexerInternal {
 
         return this.request({method: GET_HTTP_METHOD, uri})
           .then(response => Request.handleResponse(response, {404: true}, GET_OP, this.logLevel))
-          .then(response => {
-              const result = !!response ? response._source : null;
+          .then((response) => {
+              const result = _.get(response, '_source', null);
 
               if (this.logLevel === TRACE_LOG_LEVEL) {
                   console.log('get: ', uri, (performanceNow() - startTime).toFixed(3));
@@ -591,13 +591,13 @@ class IndexerInternal {
         }
 
         return this.request({method: GET_HTTP_METHOD, uri, qs: {fields: _.join(fields, ',')}})
-          .then(response => {
+          .then((response) => {
               let result = Request.handleResponse(response, {404: true}, 'OPTIMISED_GET', this.logLevel);
 
               result = !_.isUndefined(result) && !_.isNull(result) && _.get(result, 'found', false) ? _.get(result, 'fields', {}) : null;
 
               if (result) {
-                  _.forEach(fields, field => {
+                  _.forEach(fields, (field) => {
                       if (result[field] && _.isArray(result[field])) {
                           result[field] = result[field][0];
                       }
@@ -610,7 +610,7 @@ class IndexerInternal {
 
               return result;
           })
-          .catch(error => {
+          .catch((error) => {
               console.error('<< ERROR >> ', error);
               return null;
           });
@@ -619,7 +619,7 @@ class IndexerInternal {
     optimisedGet(request, measures) {
         const fields = [];
 
-        _.forEach(measures, measureConfig => {
+        _.forEach(measures, (measureConfig) => {
             let measureType = null;
             let measureName = null;
             let measureTypeConfig = null;
@@ -653,6 +653,7 @@ class IndexerInternal {
         return this.getFields(request, fields);
     }
 
+    // eslint-disable-next-line class-methods-use-this
     executeMeasures(opType, measureDefinitions, existingAggregateDoc, newAggregateDoc, existingDoc, newDoc) {
         _.forEach(measureDefinitions, (measureDefinition, measureKey) => {
             let value = null;
@@ -716,13 +717,13 @@ class IndexerInternal {
                 docField = [docField];
             }
 
-            _.forEach(docField, fieldValue => {
+            _.forEach(docField, (fieldValue) => {
                 if (!fieldValue) {
                     return true;
                 }
 
                 const aggregate = aggregateConfig.aggregateBuilder(doc, fieldValue);
-                const id = _.isFunction(aggregateConfig.indexType.id) && aggregateConfig.indexType.id(aggregate) || _.get(aggregate, 'id', null);
+                const id = (_.isFunction(aggregateConfig.indexType.id) && aggregateConfig.indexType.id(aggregate)) || _.get(aggregate, 'id', null);
 
                 if (id && aggregate) {
                     aggregates.push({id, aggregate});
@@ -747,15 +748,15 @@ class IndexerInternal {
 
             const operation = () =>
               Promise.resolve(this.aggregatorCache.retrieve(key))
-                .then(cachedAggregateData => {
+                .then((cachedAggregateData) => {
                     if (!cachedAggregateData) {
                         return this.optimisedGet({typeConfig: aggregateIndexConfig, id}, measureDefinitions)
-                          .then(result => (result && {doc: result, opType: UPDATE_OP, id, type: aggregateIndexType} || null));
+                          .then(result => ((result && {doc: result, opType: UPDATE_OP, id, type: aggregateIndexType}) || null));
                     }
 
                     return cachedAggregateData;
                 })
-                .then(existingAggregateData => {
+                .then((existingAggregateData) => {
                     let opType = null;
                     if (!existingAggregateData) {
                         opType = ADD_OP;
@@ -801,9 +802,9 @@ class IndexerInternal {
               const aggregatesToRemove = []; // if not in newDoc, but in existingDoc
               const aggregatesToUpdate = []; // if in both newDoc and existingDoc
 
-              _.forEach(newDocAggregates, newDocAggregate => {
+              _.forEach(newDocAggregates, (newDocAggregate) => {
                   let found = false;
-                  _.forEach(existingDocAggregates, existingDocAggregate => {
+                  _.forEach(existingDocAggregates, (existingDocAggregate) => {
                       if (newDocAggregate.id === existingDocAggregate.id) {
                           found = true;
                           return false;
@@ -819,9 +820,9 @@ class IndexerInternal {
                   }
               });
 
-              _.forEach(existingDocAggregates, existingDocAggregate => {
+              _.forEach(existingDocAggregates, (existingDocAggregate) => {
                   let found = false;
-                  _.forEach(newDocAggregates, newDocAggregate => {
+                  _.forEach(newDocAggregates, (newDocAggregate) => {
                       if (newDocAggregate.id === existingDocAggregate.id) {
                           found = true;
                           return false;
@@ -846,7 +847,7 @@ class IndexerInternal {
 
               // aggregate signals in newDocAggregates
               if (request.signal) {
-                  _.forEach(newDocAggregates, aggregateData => {
+                  _.forEach(newDocAggregates, (aggregateData) => {
                       const id = aggregateData.id;
                       const aggregate = aggregateData.aggregate;
 
@@ -859,15 +860,15 @@ class IndexerInternal {
 
                       const operation = () =>
                         Promise.resolve(this.aggregatorCache.retrieve(key))
-                          .then(cachedAggregateData => {
+                          .then((cachedAggregateData) => {
                               if (!cachedAggregateData) {
                                   return this.getFields({typeConfig: aggregateIndexConfig, id}, ['_dailyStats', '_weeklyStats', '_monthlyStats', '_overallStats'])
-                                    .then(result => (result && {doc: result, UPDATE_OP, id, type: aggregateIndexType} || null));
+                                    .then(result => ((result && {doc: result, UPDATE_OP, id, type: aggregateIndexType}) || null));
                               }
 
                               return cachedAggregateData;
                           })
-                          .then(existingAggregateData => {
+                          .then((existingAggregateData) => {
                               if (!existingAggregateData || !existingAggregateData.doc) {
                                   // it's actually an error
                                   console.error('No existing aggregate data for key: ', key);
@@ -890,15 +891,15 @@ class IndexerInternal {
               }
           });
 
-        return Promise.all(promises).then((responses) => _.every(responses, response => !!response));
+        return Promise.all(promises).then(responses => _.every(responses, response => !!response));
     }
 
     flushAggregate(key) {
         console.log(Chalk.yellow(`Flushing Key: ${key}`));
 
-        const operation = (lockHandle) =>
+        const operation = lockHandle =>
           Promise.resolve(this.aggregatorCache.retrieve(key))
-            .then(cachedAggregate => {
+            .then((cachedAggregate) => {
                 if (!cachedAggregate) {
                     return null;
                 }
@@ -912,7 +913,7 @@ class IndexerInternal {
                 return this.add({type, doc, id, lockHandle});
             })
             .then(() => this.aggregatorCache.remove(key))
-            .catch(error => {
+            .catch((error) => {
                 console.error(`>>> Error in flushing key: ${key}`, error, error.stack);
                 return false;
             });
@@ -956,7 +957,7 @@ class IndexerInternal {
 
         const operation = () =>
           Promise.resolve(_.isUndefined(request.existingDoc) ? this.get({typeConfig, id}) : request.existingDoc)
-            .then(existingDoc => {
+            .then((existingDoc) => {
                 if (existingDoc) {
                     return {_id: id, _type: typeConfig.type, _index: typeConfig.index, _statusCode: 404, _status: FAIL_STATUS, _failCode: 'EXISTS_ALREADY', _operation: operationType};
                 }
@@ -967,7 +968,7 @@ class IndexerInternal {
 
                 return this.request({method: PUT_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}`, body: doc})
                   .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
-                  .then(response => {
+                  .then((response) => {
                       result = response;
 
                       return this.buildAggregates({typeConfig, newDoc: doc});
@@ -994,14 +995,14 @@ class IndexerInternal {
 
         const operation = () =>
           Promise.resolve(request.doc || this.get({typeConfig, id}))
-            .then(existingDoc => {
+            .then((existingDoc) => {
                 if (!existingDoc) {
                     return {_id: id, _type: typeConfig.type, _index: typeConfig.index, _statusCode: 404, _status: FAIL_STATUS, _failCode: NOT_FOUND_FAIL_CODE, _operation: operationType};
                 }
 
                 return this.request({method: DELETE_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}`})
                   .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
-                  .then(response => {
+                  .then((response) => {
                       result = response;
 
                       return this.buildAggregates({typeConfig, existingDoc, updateMode});
@@ -1038,7 +1039,7 @@ class IndexerInternal {
 
         const operation = () =>
           Promise.resolve(request.existingDoc || this.get({typeConfig, id}))
-            .then(existingDoc => {
+            .then((existingDoc) => {
                 if (!existingDoc) {
                     return {
                         _id: id,
@@ -1099,7 +1100,7 @@ class IndexerInternal {
 
                 return this.request({method: POST_HTTP_METHOD, uri: `${typeConfig.index}/${typeConfig.type}/${id}/_update`, body: {doc: newDoc}})
                   .then(response => Request.handleResponse(response, {404: true}, operationType, this.logLevel))
-                  .then(response => {
+                  .then((response) => {
                       result = response;
 
                       return this.buildAggregates({typeConfig, newDoc, existingDoc, updateMode, signal: request.signal});
@@ -1110,6 +1111,7 @@ class IndexerInternal {
         return this.lock.usingLock(operation, `${typeConfig.type}:${id}`, request.lockHandle, timeTaken => console.log(Chalk.green(`Updated ${typeConfig.type} #${id} in ${timeTaken}ms`)));
     }
 
+    // eslint-disable-next-line class-methods-use-this
     _dayToMonth(valueOrMoment) {
         if (!moment.isMoment(valueOrMoment)) {
             valueOrMoment = moment(valueOrMoment, SignalAggregateTimeUnitMap.day.format);
@@ -1118,6 +1120,7 @@ class IndexerInternal {
         return Number.parseInt(valueOrMoment.format(SignalAggregateTimeUnitMap.month.format), 10);
     }
 
+    // eslint-disable-next-line class-methods-use-this
     _dayToWeek(valueOrMoment) {
         if (!moment.isMoment(valueOrMoment)) {
             valueOrMoment = moment(valueOrMoment, SignalAggregateTimeUnitMap.day.format);
@@ -1126,6 +1129,7 @@ class IndexerInternal {
         return Number.parseInt(valueOrMoment.format(SignalAggregateTimeUnitMap.week.format), 10);
     }
 
+    // eslint-disable-next-line class-methods-use-this
     _hourToDay(valueOrMoment) {
         if (!moment.isMoment(valueOrMoment)) {
             valueOrMoment = moment(valueOrMoment, SignalAggregateTimeUnitMap.hour.format);
@@ -1134,6 +1138,7 @@ class IndexerInternal {
         return Number.parseInt(valueOrMoment.format(SignalAggregateTimeUnitMap.day.format), 10);
     }
 
+    // eslint-disable-next-line class-methods-use-this
     _timestampToHour(valueOrMoment) {
         if (!moment.isMoment(valueOrMoment)) {
             valueOrMoment = moment(valueOrMoment);
@@ -1142,6 +1147,7 @@ class IndexerInternal {
         return Number.parseInt(valueOrMoment.format(SignalAggregateTimeUnitMap.hour.format), 10);
     }
 
+    // eslint-disable-next-line class-methods-use-this
     _lastNPeriodStart(inputPeriod, periodUnit, inputPeriodAsMoment) {
         if (!inputPeriodAsMoment) {
             inputPeriodAsMoment = moment(inputPeriod, periodUnit.format);
@@ -1166,7 +1172,7 @@ class IndexerInternal {
             inputPeriodAsMoment = moment(inputPeriod, periodUnit.format);
         }
 
-        const fieldKey = (field) => `${statsGroup}.${signalName}.${field}`;
+        const fieldKey = field => `${statsGroup}.${signalName}.${field}`;
 
         // there may not be any stat too in oldDoc
         const oldPeriod = _.get(stats, fieldKey(StatsMappingFields.TimeInUnit), 0);
@@ -1183,7 +1189,7 @@ class IndexerInternal {
         const setInLastNStats = (timeInUnit, value, add) => {
             let found = false;
 
-            _.forEach(lastNStats, stat => {
+            _.forEach(lastNStats, (stat) => {
                 if (stat.timeInUnit === timeInUnit) {
                     if (add) {
                         stat.value = (stat.value || 0) + value;
@@ -1265,8 +1271,9 @@ class IndexerInternal {
         }
     }
 
+    // eslint-disable-next-line class-methods-use-this
     _aggregateOverallSignal(stats, signalName, signalValue = 1, updateTime) {
-        const fieldKey = (field) => `_overallStats.${signalName}.${field}`;
+        const fieldKey = field => `_overallStats.${signalName}.${field}`;
 
         _.set(stats, fieldKey(StatsMappingFields.LastUpdateTime), updateTime);
         _.set(stats, fieldKey(StatsMappingFields.Value), signalValue + _.get(stats, fieldKey(StatsMappingFields.Value), 0));
@@ -1376,9 +1383,9 @@ class IndexerInternal {
 
         const key = `${typeConfig.type}:${id}`;
 
-        const operation = (lockHandle) =>
+        const operation = lockHandle =>
           Promise.resolve(this.get({typeConfig, id}))
-            .then(existingDoc => {
+            .then((existingDoc) => {
                 if (existingDoc) {
                     return this.update({typeConfig, id, doc, existingDoc, lockHandle, updateMode});
                 }
@@ -1386,7 +1393,7 @@ class IndexerInternal {
                 return this.add({typeConfig, doc, existingDoc: null, id, lockHandle});
             });
 
-        return this.lock.usingLock(operation, key, null, (timeTaken) => console.log(Chalk.magenta(`Upserted ${typeConfig.type} #${id} in ${timeTaken}ms`)));
+        return this.lock.usingLock(operation, key, null, timeTaken => console.log(Chalk.magenta(`Upserted ${typeConfig.type} #${id} in ${timeTaken}ms`)));
     }
 
     merge(request) {
@@ -1437,9 +1444,9 @@ class IndexerInternal {
 
         // TODO: retrieval of the document could be from cache
         // TODO: we retrieve only signals
-        const operation = (lockHandle) =>
+        const operation = lockHandle =>
           Promise.resolve(this.get({typeConfig, id}))
-            .then(existingDoc => {
+            .then((existingDoc) => {
                 if (!existingDoc) {
                     throw new ValidationError(`SIGNAL: No document found for type=[${request.type}] and id=[${id}]`, {details: {code: 'NOT_EXISTS'}});
                 }
@@ -1455,7 +1462,7 @@ class IndexerInternal {
 
         const key = `${typeConfig.type}:${id}`;
 
-        return this.lock.usingLock(operation, key, null, (timeTaken) => console.log(Chalk.magenta(`Added Signal for ${typeConfig.type} #${id} in ${timeTaken}ms`)));
+        return this.lock.usingLock(operation, key, null, timeTaken => console.log(Chalk.magenta(`Added Signal for ${typeConfig.type} #${id} in ${timeTaken}ms`)));
     }
 
     // createLookupDictionary(dictionaryName) {
@@ -1513,16 +1520,17 @@ export default class Indexer {
         this.internal = new IndexerInternal(indicesConfig);
     }
 
+    // eslint-disable-next-line class-methods-use-this
     errorWrap(method, request, promise) {
         return Promise.resolve(promise)
-          .catch(error => {
+          .catch((error) => {
               console.error('>>> Error', method, request, error, error.stack);
               if (error && (error._errorCode === 'VALIDATION_ERROR' || error._errorCode === 'INTERNAL_SERVICE_ERROR')) {
                   // rethrow same error
                   throw error;
               }
 
-              throw new InternalServiceError('Internal Service Error', {details: error && error.cause || error, stack: error && error.stack});
+              throw new InternalServiceError('Internal Service Error', {details: (error && error.cause) || error, stack: error && error.stack});
           });
     }
 

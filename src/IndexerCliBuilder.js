@@ -13,7 +13,7 @@ export default function (indexerBuilder, indicesConfig) {
 
     _(indicesConfig.indices)
       .keys()
-      .forEach(indexKey => {
+      .forEach((indexKey) => {
           const name = _.upperFirst(_.camelCase(indexKey));
 
           new Command(`create${name}Index`)
@@ -27,7 +27,7 @@ export default function (indexerBuilder, indicesConfig) {
 
     _(indicesConfig.types)
       .keys()
-      .forEach(typeKey => {
+      .forEach((typeKey) => {
           const typeConfig = indicesConfig.types[typeKey];
           if (typeConfig.child) {
               return true;
@@ -53,7 +53,7 @@ export default function (indexerBuilder, indicesConfig) {
           new Command(`delete${name}`)
             .option('--id <id>', `ID of the ${typeKey} to delete`)
             .description(`Deletes ${name}`)
-            .action((args) => indexerBuilder.remove(null, {type: typeConfig.type, id: args.id}));
+            .action(args => indexerBuilder.remove(null, {type: typeConfig.type, id: args.id}));
 
           return true;
       });

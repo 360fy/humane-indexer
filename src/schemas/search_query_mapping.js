@@ -1,8 +1,8 @@
 // jscs:disable requireCamelCaseOrUpperCaseIdentifiers
 export default {
     key: '$IdentityText',
-    query: '$Text',
-    unicodeQuery: '$VernacularText',
+    value: '$Text',
+    unicodeValue: '$VernacularText',
     count: '$Long',
     // weight: '$Double',
     hasResults: '$Boolean'

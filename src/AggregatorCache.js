@@ -38,7 +38,7 @@ class DistributedCache {
 
     retrieve(key) {
         return this.redisClient.getAsync(this.getKey(key))
-          .then(data => {
+          .then((data) => {
               if (!_.isUndefined(data) && !_.isNull(data) && _.isString(data)) {
                   return JSON.parse(data);
               }
@@ -58,7 +58,7 @@ class DistributedCache {
     keys() {
         // TODO: probably SCAN based implementation is better, but there may not be many keys too...
         return this.redisClient.keysAsync(`${this.keyPrefix}*`)
-          .then((keys) => keys.map(key => key.substring(this.keyPrefix.length, key.length)));
+          .then(keys => keys.map(key => key.substring(this.keyPrefix.length, key.length)));
     }
 
     shutdown() {
@@ -84,7 +84,7 @@ class LocalCache {
         }
 
         this.cache[key] = data;
-        this.keysCount++;
+        this.keysCount += 1;
         return data;
     }
 
@@ -95,7 +95,7 @@ class LocalCache {
     remove(key) {
         this.cache[key] = undefined;
         delete this.cache[key];
-        this.keysCount--;
+        this.keysCount -= 1;
 
         if (this.logLevel === 'trace') {
             console.log('(LocalCache) Removed key: ', key, this.keysCount);
@@ -279,7 +279,7 @@ export default class Cache {
         }
 
         return Promise.resolve(this.keys())
-          .then(keys => {
+          .then((keys) => {
               if (!keys || _.isEmpty(keys)) {
                   if (this.logLevel === 'trace') {
                       console.log('Removing Flush Schedule: found no keys');
@@ -288,7 +288,7 @@ export default class Cache {
                   return this.removeFlushSchedule();
               }
 
-              return Promise.map(keys, (key) => this.indexer.flushAggregate(key), {concurrency: 1})
+              return Promise.map(keys, key => this.indexer.flushAggregate(key), {concurrency: 1})
                 .then(() => {
                     if (!noSchedule) {
                         this.schedule = null;

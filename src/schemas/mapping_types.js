@@ -1,11 +1,11 @@
 // jscs:disable requireCamelCaseOrUpperCaseIdentifiers
 export const $Keyword = {
-    type: 'string',
+    type: 'text',
     analyzer: 'humane_keyword_analyzer'
 };
 
 export const $VernacularKeyword = {
-    type: 'string',
+    type: 'keyword',
     analyzer: 'humane_keyword_analyzer'
 };
 
@@ -15,7 +15,7 @@ export const $Integer = {
 
 export const $NotIndexedInteger = {
     type: 'integer',
-    index: 'no',
+    index: false,
     include_in_all: false
 };
 
@@ -25,7 +25,7 @@ export const $Short = {
 
 export const $NotIndexedShort = {
     type: 'short',
-    index: 'no',
+    index: false,
     include_in_all: false
 };
 
@@ -35,7 +35,7 @@ export const $Long = {
 
 export const $NotIndexedLong = {
     type: 'long',
-    index: 'no',
+    index: false,
     include_in_all: false
 };
 
@@ -45,7 +45,7 @@ export const $Double = {
 
 export const $NotIndexedDouble = {
     type: 'double',
-    index: 'no',
+    index: false,
     include_in_all: false
 };
 
@@ -55,7 +55,7 @@ export const $Boolean = {
 
 export const $NotIndexedBoolean = {
     type: 'boolean',
-    index: 'no',
+    index: false,
     include_in_all: false
 };
 
@@ -65,56 +65,55 @@ export const $Date = {
 };
 
 export const $NotIndexedText = {
-    type: 'string',
-    index: 'no',
+    type: 'keyword',
+    index: false,
     include_in_all: false
 };
 
 export const $IdentityText = {
-    type: 'string',
-    index: 'not_analyzed'
+    type: 'keyword'
 };
 
 export const $Text = {
-    type: 'string',
+    type: 'text',
     analyzer: 'humane_standard_analyzer',
     fields: {
         raw: $IdentityText,
 
         humane: {
-            type: 'humane_text',
+            type: 'text',
             analyzer: 'humane_text_analyzer'
         },
         shingle: {
-            type: 'string',
+            type: 'text',
             analyzer: 'humane_shingle_text_analyzer'
         }
     }
 };
 
 export const $DescriptiveText = {
-    type: 'string',
+    type: 'text',
     analyzer: 'humane_standard_analyzer',
     fields: {
         humane: {
-            type: 'humane_descriptive_text',
+            type: 'text',
             analyzer: 'humane_descriptive_text_analyzer'
         },
         shingle: {
-            type: 'string',
+            type: 'text',
             analyzer: 'humane_shingle_text_analyzer'
         }
     }
 };
 
 export const $VernacularText = {
-    type: 'string',
+    type: 'text',
     analyzer: 'humane_standard_analyzer',
     fields: {
         raw: $IdentityText,
         
         vernacular: {
-            type: 'string',
+            type: 'text',
             analyzer: 'humane_vernacular_analyzer'
         }
     }
