@@ -1,6 +1,6 @@
 {
   "name": "humane-indexer",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Indexer module for Humane Discovery",
   "repository": "git@github.com:360fy/humane-indexer.git",
   "scripts": {
