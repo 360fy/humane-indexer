@@ -590,11 +590,11 @@ class IndexerInternal {
             startTime = performanceNow();
         }
 
-        return this.request({method: GET_HTTP_METHOD, uri, qs: {fields: _.join(fields, ',')}})
+        return this.request({method: GET_HTTP_METHOD, uri, qs: {_source: _.join(fields, ',')}})
           .then((response) => {
               let result = Request.handleResponse(response, {404: true}, 'OPTIMISED_GET', this.logLevel);
 
-              result = !_.isUndefined(result) && !_.isNull(result) && _.get(result, 'found', false) ? _.get(result, 'fields', {}) : null;
+              result = !_.isUndefined(result) && !_.isNull(result) && _.get(result, 'found', false) ? _.get(result, '_source', {}) : null;
 
               if (result) {
                   _.forEach(fields, (field) => {

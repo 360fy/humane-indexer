@@ -4,6 +4,12 @@ export const $Keyword = {
     analyzer: 'humane_keyword_analyzer'
 };
 
+export const $FacetKeyword = {
+    type: 'text',
+    analyzer: 'humane_keyword_analyzer',
+    fielddata: true
+};
+
 export const $VernacularKeyword = {
     type: 'keyword',
     analyzer: 'humane_keyword_analyzer'
