@@ -129,7 +129,7 @@ export default class Cache {
                 this.flushTimeout = cacheConfig.flushTimeout;
             }
         } else {
-            this.flushTimeout = 10000;
+            this.flushTimeout = 60000;
         }
 
         if (mode === 'redis') {

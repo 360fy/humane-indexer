@@ -9,10 +9,11 @@ import ValidationError from 'humane-node-commons/lib/ValidationError';
 import InternalServiceError from 'humane-node-commons/lib/InternalServiceError';
 import Lock from './Lock';
 import AggregatorCache from './AggregatorCache';
-import AnalysisSetting from './schemas/analysis_setting';
 import * as MappingTypes from './schemas/mapping_types';
 import SearchQueryMapping from './schemas/search_query_mapping';
 import IntentMapping from './schemas/intent_mapping';
+import KeywordMapping from './schemas/keyword_mapping';
+import StopWordMapping from './schemas/stopword_mapping';
 import * as MeasureFunctions from './MeasureFunctions';
 
 const GET_OP = 'GET';
@@ -79,41 +80,13 @@ const SignalAggregateTimeUnitMap = {
 };
 
 const StatsMappingFields = {
-    // Name: 'name',
     TimeInUnit: 'timeInUnit',
     LastUpdateTime: 'lastUpdateTime',
     LastNStats: 'lastNStats',
     Value: 'value'
 };
 
-// const StatsMapping = {
-//     type: 'object'
-//     // properties: {
-//     //     name: '$Keyword',
-//     //     value: '$Long',
-//     //     timeInUnit: '$Long',
-//     //     lastUpdateTime: '$Date',
-//     //     lastNStats: {
-//     //         type: 'nested',
-//     //         properties: {
-//     //             value: '$Long',
-//     //             timeInUnit: '$Long'
-//     //         }
-//     //     }
-//     // }
-// };
-//
-// const OverallStatsMapping = {
-//     type: 'object'
-//     // properties: {
-//     //     name: '$Keyword',
-//     //     value: '$Long',
-//     //     lastUpdateTime: '$Date'
-//     // }
-// };
-
 const LangMapping = '$Keyword';
-
 const WeightMapping = '$Double';
 
 //
@@ -137,7 +110,7 @@ class IndexerInternal {
         const DefaultTypes = {
             searchQuery: {
                 index: 'search_query',
-                // word_index_enabled: false,
+                // token_index_enabled: false,
                 mapping: SearchQueryMapping,
                 id: doc => doc.key,
                 weight: doc => doc.count,
@@ -146,9 +119,19 @@ class IndexerInternal {
                 // aggregateBuilder: (existingDoc, newDoc) => ({key: newDoc.key, _lang: newDoc._lang, query: newDoc.query, unicodeQuery: newDoc.unicodeQuery, hasResults: newDoc.hasResults})
             },
             intent: {
-                index: 'intent',
-                word_index_enabled: true,
+                index: 'metadata',
+                token_index_enabled: true,
                 mapping: IntentMapping
+            },
+            keyword: {
+                index: 'metadata',
+                token_index_enabled: true,
+                mapping: KeywordMapping
+            },
+            stopWord: {
+                index: 'metadata',
+                token_index_enabled: true,
+                mapping: StopWordMapping
             }
         };
 
@@ -208,13 +191,12 @@ class IndexerInternal {
         if (!index) {
             // we build index
             indices[indexStore] = index = {
-                store: indexStore,
-                analysis: AnalysisSetting
+                store: indexStore
             };
 
-            if (!_.isUndefined(type.word_index_enabled)) {
+            if (!_.isUndefined(type.token_index_enabled)) {
                 index.indexSettings = {
-                    word_index_enabled: type.word_index_enabled
+                    token_index_enabled: type.token_index_enabled
                 };
             }
         }
@@ -459,8 +441,7 @@ class IndexerInternal {
                           settings: {
                               index: _.defaultsDeep(indexConfig.indexSettings, {
                                   number_of_shards: 2,
-                                  word_index_enabled: false
-                                  // word_index_name: `${_.toLower(this.instanceName)}:word_store`
+                                  token_index_enabled: false
                               }),
                               analysis: indexConfig.analysis
                           },
@@ -497,8 +478,7 @@ class IndexerInternal {
                 settings: {
                     index: _.defaultsDeep(indexConfig.indexSettings, {
                         number_of_shards: 2,
-                        word_index_enabled: false
-                        // word_index_name: null
+                        token_index_enabled: false
                     }),
                     analysis: indexConfig.analysis
                 },
@@ -531,8 +511,7 @@ class IndexerInternal {
     //             settings: {
     //                 index: _.defaultsDeep(indexConfig.indexSettings, {
     //                     number_of_shards: 2,
-    //                     word_index_enabled: true,
-    //                     word_index_name: null
+    //                     token_index_enabled: true,
     //                 }),
     //                 analysis: indexConfig.analysis
     //             },

@@ -128,3 +128,14 @@ export const $VernacularText = {
 export const $Geo = {
     type: 'geo_point'
 };
+
+export const $Object = {
+    type: 'object',
+    dynamic: true
+};
+
+export const $NotIndexedObject = {
+    type: 'object',
+    dynamic: true,
+    enabled: false
+};
